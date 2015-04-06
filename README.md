@@ -1,5 +1,4 @@
-# Lazy Selector on ITK Showcase
-Lazy Selector / visualisation of connected components. And itk showcase.
+# Graph Cuts
 
 Dependencies
 ------------
@@ -26,7 +25,7 @@ Running
     
 Run with
 
-    ./lazySelecThor pathToVolume [binary threshold]
+    ./graphCutter -i ~/code/data/twoConnectedComponent.tif -g ~/code/data/seedSink.tif -v
     
 License
 -------
