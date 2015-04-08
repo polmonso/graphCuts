@@ -64,11 +64,27 @@ class GraphCutsAdapter {
                                          typename ShapeLabelObjectType::Pointer& labelObject2);
 
     //TODO avoid copy of std::vectors
+    /**
+     * @brief dummy graphcuts method
+     *
+     * Copies the seeds and sinks with different labels to the output.
+     * A dummy method that replaces the graphcuts which would return the
+     * splitted image
+     *
+     * @param segmentationImage image with the image data (usually only the ROI)
+     * @param gradientImage image with the gradient of segmentationImage
+     * @param seeds coordinates of the graphcuts' seeds
+     * @param sinks coordinates of the graphcuts' sinks
+     * @param splittedSegmentationImage output image with the splitted segmentation, that is,
+     * two segmentations with two different labels or two connected components separated by
+     * a background value pixel (not fully connected)
+     * @return -1 on failure, 0 on success
+     */
     static int dummygraphcuts(const TImageType* segmentationImage,
                               const GradientImageType* gradientImage,
                               const std::vector< typename TImageType::IndexType >& seeds,
                               const std::vector< typename TImageType::IndexType >& sinks,
-                              typename TImageType::Pointer& cutSegmentationImage);
+                              typename TImageType::Pointer& splittedSegmentationImage);
 
     static int mergeRegions(std::vector< typename TImageType::RegionType >& regions,
                             typename TImageType::RegionType& region){

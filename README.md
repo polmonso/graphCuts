@@ -27,6 +27,10 @@ Run with
 
     ./graphCutter -i ~/code/data/twoConnectedComponent.tif -g ~/code/data/seedSink.tif -v
     
+You can find sample data at [cvlab](https://documents.epfl.ch/groups/c/cv/cvlab-unit/public/espina/sample_data/)
+    
+    
+    
 License
 -------
 GPL v3 see LICENSE

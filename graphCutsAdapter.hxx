@@ -249,11 +249,11 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
                                                    const GradientImageType* gradientImage,
                                                    const std::vector< typename TImageType::IndexType >& seeds,
                                                    const std::vector< typename TImageType::IndexType >& sinks,
-                                                   typename TImageType::Pointer& cutSegmentationImage) {
+                                                   typename TImageType::Pointer& splittedSegmentationImage) {
 
   //TODO remove when computing boundingbox is ready
-  cutSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
-  cutSegmentationImage->Allocate();
+  splittedSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
+  splittedSegmentationImage->Allocate();
 
   //Just checking the gradient
   typedef itk::ImageFileWriter< GradientImageType > GradientWriterFilterType;
@@ -269,10 +269,10 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
 
   //we don't have the graphcuts yet, so let's say the result ofthe graphcut is just the sinkSeedImage
   for(int i = 0; i<seeds.size(); i++)
-    cutSegmentationImage->SetPixel(seeds[i], 128);
+    splittedSegmentationImage->SetPixel(seeds[i], 128);
 
   for(int i = 0; i<sinks.size(); i++)
-    cutSegmentationImage->SetPixel(sinks[i], 255);
+    splittedSegmentationImage->SetPixel(sinks[i], 255);
 
   return NAILEDIT;
 }
