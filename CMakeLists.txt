@@ -23,7 +23,10 @@ set(MAXFLOW_HDR )
 set(MAXFLOW_INCLUDE_DIRS maxflow)
 
 # we need this so headers show up on qt creator
-set(GRAPHCUTS_HEADERS graphCutsAdapter.h graphCutsAdapter.hxx VerbosityConstant.h visualization.h)
+set(GRAPHCUTS_HEADERS graphCutsAdapter.h
+                      graphCutsAdapter.hxx
+                      VerbosityConstant.h
+                      visualization.h)
 
 # Add this if we wan to provide a library of the itk wrapper + maxflow.
 # The itk wrapper is header only, so no need for now

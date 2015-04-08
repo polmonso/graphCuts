@@ -56,6 +56,8 @@
 
 #include "itkRegionOfInterestImageFilter.h"
 
+#include "itkGradientMagnitudeRecursiveGaussianImageFilter.h"
+
 #include <ostream>
 #include <random>
 
@@ -244,12 +246,26 @@ int GraphCutsAdapter< TImageType >::bilabelImage2LabelObjects(const TImageType* 
 //TODO avoid copy of std::vectors
 template< typename TImageType >
 int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentationImage,
+                                                   const GradientImageType* gradientImage,
                                                    const std::vector< typename TImageType::IndexType >& seeds,
                                                    const std::vector< typename TImageType::IndexType >& sinks,
                                                    typename TImageType::Pointer& cutSegmentationImage) {
 
+  //TODO remove when computing boundingbox is ready
   cutSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
   cutSegmentationImage->Allocate();
+
+  //Just checking the gradient
+  typedef itk::ImageFileWriter< GradientImageType > GradientWriterFilterType;
+  typename GradientWriterFilterType::Pointer gwriter = GradientWriterFilterType::New();
+  gwriter->SetInput(gradientImage);
+  gwriter->SetFileName("gradient.tif");
+  try {
+    gwriter->Update();
+  } catch( itk::ExceptionObject & error ) {
+    std::cerr << __FILE__ << ":" << __LINE__ << "Error: " << error << std::endl;
+    return FUCKEDUP;
+  }
 
   //we don't have the graphcuts yet, so let's say the result ofthe graphcut is just the sinkSeedImage
   for(int i = 0; i<seeds.size(); i++)
@@ -339,9 +355,20 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* segmentationImage,
   segmentationROIextractor->SetRegionOfInterest(roi);
   segmentationROIextractor->SetInput(segmentationImage);
 
+
+  //features
+  typedef itk::GradientMagnitudeRecursiveGaussianImageFilter<TImageType, GradientImageType> GradientFilterType;
+  typename GradientFilterType::Pointer gradientFilter = GradientFilterType::New();
+  gradientFilter->SetInput(segmentationROIextractor->GetOutput());
+  float sigma = 3.5; //TODO use 3.5, pass by parameter or what?
+  gradientFilter->SetSigma( sigma );
+
   try {
 
-    segmentationROIextractor->Update();
+    // unnecessary if we have pipeline
+    // segmentationROIextractor->Update();
+    //TODO load from disk if available
+    gradientFilter->Update();
 
   } catch( itk::ExceptionObject & error ) {
     std::cerr << __FILE__ << ":" << __LINE__ << "Error: " << error << std::endl;
@@ -349,6 +376,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* segmentationImage,
   }
 
   typename TImageType::Pointer segmentationROI = segmentationROIextractor->GetOutput();
+  typename GradientImageType::Pointer gradient = gradientFilter->GetOutput();
 
   //Do graphcuts
 
@@ -360,7 +388,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* segmentationImage,
 
   //temporary patch
   {
-    dummygraphcuts(segmentationROI, seeds, sinks, cutSegmentationImage);
+    dummygraphcuts(segmentationROI, gradient, seeds, sinks, cutSegmentationImage);
   }
   //
   //
