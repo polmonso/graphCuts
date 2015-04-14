@@ -217,7 +217,7 @@ int GraphCutsAdapter< TImageType >::bilabelImage2LabelObjects(const TImageType* 
   const unsigned int numObjects = imageToShapeLabelMapFilter->GetOutput()->GetNumberOfLabelObjects();
 
   //we assume that there's only one connected component
-  assert(numObjects == 2  && " we assume you only have 2 labels");
+  assert(numObjects == 2  && " we assume you only have 2 labels, but there weren't.");
 
   if(numObjects != 2) {
     std::cerr << numObjects << " !=2 objects present. Stop." << std::endl;
@@ -251,23 +251,34 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
                                                    const std::vector< typename TImageType::IndexType >& sinks,
                                                    typename TImageType::Pointer& splittedSegmentationImage) {
 
-  //TODO remove when computing boundingbox is ready
+  assert(segmentationImage->GetLargestPossibleRegion().GetSize()[0] > 0);
+
+  //TODO maybe it's ok to delegate the allocation to the client
   splittedSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
   splittedSegmentationImage->Allocate();
 
   //Just checking the gradient
-  typedef itk::ImageFileWriter< GradientImageType > GradientWriterFilterType;
-  typename GradientWriterFilterType::Pointer gwriter = GradientWriterFilterType::New();
-  gwriter->SetInput(gradientImage);
-  gwriter->SetFileName("gradient.tif");
-  try {
-    gwriter->Update();
-  } catch( itk::ExceptionObject & error ) {
-    std::cerr << __FILE__ << ":" << __LINE__ << "Error: " << error << std::endl;
-    return FUCKEDUP;
+  if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
+    typedef itk::ImageFileWriter< GradientImageType > GradientWriterFilterType;
+    typename GradientWriterFilterType::Pointer gwriter = GradientWriterFilterType::New();
+    gwriter->SetInput(gradientImage);
+    gwriter->SetFileName("gradient.tif");
+    try {
+      gwriter->Update();
+    } catch( itk::ExceptionObject & error ) {
+      std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
+      return FUCKEDUP;
+    }
   }
 
   //we don't have the graphcuts yet, so let's say the result ofthe graphcut is just the sinkSeedImage
+
+  if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH)
+    std::cout << "Seeds " << seeds.size() << " Sinks " << sinks.size() << std::endl;
+
+  assert(seeds.size() > 0 && sinks.size() > 0);
+
+
   for(int i = 0; i<seeds.size(); i++)
     splittedSegmentationImage->SetPixel(seeds[i], 128);
 
@@ -300,9 +311,7 @@ int GraphCutsAdapter< TImageType >::labelObjects2Image(ShapeLabelObjectType* lab
 
   if(region.GetSize()[0] == 0) {
     std::cerr << "label image not allocated. Using labelobjects boundingbox." << std::endl;
-//    mergeRegions(std::vector<typename TImageType::RegionType&>{labelObject1->GetBoundingBox(), labelObject2->GetBoundingBox()});
-//    region.SetSize()
-
+    mergeRegions(std::vector<typename TImageType::RegionType>{labelObject1->GetBoundingBox(), labelObject2->GetBoundingBox()}, region);
   }
 
 
@@ -326,20 +335,16 @@ int GraphCutsAdapter< TImageType >::labelObjects2Image(ShapeLabelObjectType* lab
   try {
     label2volume->Update();
   } catch( itk::ExceptionObject & error ) {
-    std::cerr << __FILE__ << ":" << __LINE__ << "Error: " << error << std::endl;
+    std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
     return FUCKEDUP;
   }
   labelMapImage = label2volume->GetOutput();
 
 }
 
-/**
-       * @param segmentationImage with the scores
-       * @param seedSinksImage with the two labels for seeds and sinks
-       * @param bilabelImage label image with the two splitted conected components
-       */
 template< typename TImageType >
-int GraphCutsAdapter< TImageType >::process(const TImageType* segmentationImage,
+int GraphCutsAdapter< TImageType >::process(const TImageType* image,
+                                            const TImageType* segmentationImage,
                                             std::vector< typename TImageType::IndexType > seeds,
                                             std::vector< typename TImageType::IndexType > sinks,
                                             typename ShapeLabelObjectType::Pointer& labelObject1,
@@ -351,29 +356,35 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* segmentationImage,
   getBoundingBox(segmentationImage, roi);
 
   typedef itk::RegionOfInterestImageFilter< TImageType, TImageType > ROIFilterType;
-  typename ROIFilterType::Pointer segmentationROIextractor = ROIFilterType::New();
-  segmentationROIextractor->SetRegionOfInterest(roi);
-  segmentationROIextractor->SetInput(segmentationImage);
-
+  typename ROIFilterType::Pointer imageROIextractor = ROIFilterType::New();
+  imageROIextractor->SetRegionOfInterest(roi);
+  imageROIextractor->SetInput(image);
 
   //features
   typedef itk::GradientMagnitudeRecursiveGaussianImageFilter<TImageType, GradientImageType> GradientFilterType;
   typename GradientFilterType::Pointer gradientFilter = GradientFilterType::New();
-  gradientFilter->SetInput(segmentationROIextractor->GetOutput());
+  gradientFilter->SetInput(imageROIextractor->GetOutput());
   float sigma = 3.5; //TODO use 3.5, pass by parameter or what?
   gradientFilter->SetSigma( sigma );
 
+  typedef itk::RegionOfInterestImageFilter< TImageType, TImageType > ROIFilterType;
+  typename ROIFilterType::Pointer segmentationROIextractor = ROIFilterType::New();
+  segmentationROIextractor->SetRegionOfInterest(roi);
+  segmentationROIextractor->SetInput(segmentationImage);
+
   try {
+    segmentationROIextractor->Update();
 
     // unnecessary if we have pipeline
-    // segmentationROIextractor->Update();
+    // imageROIextractor->Update();
     //TODO load from disk if available
     gradientFilter->Update();
 
   } catch( itk::ExceptionObject & error ) {
-    std::cerr << __FILE__ << ":" << __LINE__ << "Error: " << error << std::endl;
+    std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
     return FUCKEDUP;
   }
+
 
   typename TImageType::Pointer segmentationROI = segmentationROIextractor->GetOutput();
   typename GradientImageType::Pointer gradient = gradientFilter->GetOutput();
@@ -381,17 +392,35 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* segmentationImage,
   //Do graphcuts
 
   typename TImageType::Pointer cutSegmentationImage = TImageType::New();
+
   //if we want registration on the labelMap.tif (written below) uncomment this and comment
   //graphCutsAdapter.h:dummygraphcuts():243 :244
-  //      cutSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
-  //      cutSegmentationImage->Allocate();
+  //otherwise only the size of the labels is allocated and therefore sizeCut < sizeImage
+  //which is irrellevant if we are only interested in the labelObjects' region position indexes
+  //cutSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
+  //cutSegmentationImage->Allocate();
 
   //temporary patch
+  int result;
   {
-    dummygraphcuts(segmentationROI, gradient, seeds, sinks, cutSegmentationImage);
+    result = dummygraphcuts(segmentationROI, gradient, seeds, sinks, cutSegmentationImage);
   }
   //
+  if(result == FUCKEDUP)
+    return FUCKEDUP;
   //
+
+  if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
+    typename WriterFilterType::Pointer writer = WriterFilterType::New();
+    writer->SetInput(cutSegmentationImage);
+    writer->SetFileName("graphCutsOutput.tif");
+    try {
+      writer->Update();
+    } catch( itk::ExceptionObject & error ) {
+      std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
+      return FUCKEDUP;
+    }
+  }
 
   //Transform graphcut output to labelObjects
   bilabelImage2LabelObjects(cutSegmentationImage, labelObject1, labelObject2);
@@ -418,9 +447,11 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* segmentationImage,
   if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
 
     typename TImageType::Pointer labelMapImage = TImageType::New();
+#ifndef TESTAUTOMATICMERGEOFLABELS
     labelMapImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
     labelMapImage->Allocate();
     labelMapImage->FillBuffer(0);
+#endif
 
     labelObjects2Image(labelObject1, labelObject2, labelMapImage);
 
@@ -431,7 +462,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* segmentationImage,
     try {
       writer->Update();
     } catch( itk::ExceptionObject & error ) {
-      std::cerr << __FILE__ << __LINE__ << "Error: " << error << std::endl;
+      std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
       return FUCKEDUP;
     }
   }
