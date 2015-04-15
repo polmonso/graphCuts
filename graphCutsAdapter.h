@@ -86,31 +86,49 @@ class GraphCutsAdapter {
                               const std::vector< typename TImageType::IndexType >& sinks,
                               typename TImageType::Pointer& splittedSegmentationImage);
 
-    static int mergeRegions(std::vector< typename TImageType::RegionType >& regions,
+    static int mergeRegions(const std::vector< typename TImageType::RegionType >& regions,
                             typename TImageType::RegionType& region){
 
-      typename TImageType::IndexType index;
-      typename TImageType::SizeType size;
+#warning check that this is correct, and maybe there's a better way. '
+
+      typename TImageType::IndexType index = regions[0].GetIndex();
+      typename TImageType::SizeType size = regions[0].GetSize();
+
+      typename TImageType::IndexType indexE = regions[0].GetIndex() + size;
+
+      for(auto region : regions)
+      {
+
+        typename TImageType::IndexType indexAux = region.GetIndex() + region.GetSize();
+
+        for(unsigned int dim = 0; dim < TImageType::ImageDimension; dim++)
+        {
+          index[dim] = std::min(region.GetIndex()[dim], index[dim]);
+          indexE[dim] = std::max(indexAux[dim], indexE[dim]);
+        }
+      }
 
       for(unsigned int dim = 0; dim < TImageType::ImageDimension; dim++)
-      {
-        for(auto region : regions)
-          {
-          //[dim] = std::max(region.GetIndex()[dim], )
+        size[dim] = indexE[dim] - index[dim];
 
-          }
-      }
+      region.SetIndex(index);
+      region.SetSize(size);
+
     }
 
     static int labelObjects2Image(ShapeLabelObjectType* labelObject1,
                                   ShapeLabelObjectType* labelObject2,
                                   typename TImageType::Pointer& labelMapImage);
     /**
-       * @param segmentationImage with the scores
-       * @param seedSinksImage with the two labels for seeds and sinks
-       * @param bilabelImage label image with the two splitted conected components
-       */
-    static int process(const TImageType* segmentationImage,
+     * @param image with the original image data
+     * @param segmentationImage with the selected segmentation to split
+     * @param seeds vector of coordinates for the seeds
+     * @param seeds vector of coordinates for the sinks
+     * @param labelObject1 output label object
+     * @param labelObject1 output label object
+     */
+    static int process(const TImageType* image,
+                       const TImageType* segmentationImage,
                        std::vector< typename TImageType::IndexType > seeds,
                        std::vector< typename TImageType::IndexType > sinks,
                        typename ShapeLabelObjectType::Pointer& labelObject1,
