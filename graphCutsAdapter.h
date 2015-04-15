@@ -25,6 +25,8 @@
 
 #include "itkRegionOfInterestImageFilter.h"
 
+#define YOUARENOTREADY 2
+#define JUSTONEOBJECT 1
 #define NAILEDIT 0
 #define FUCKEDUP -1
 
@@ -82,8 +84,8 @@ class GraphCutsAdapter {
      */
     static int dummygraphcuts(const TImageType* segmentationImage,
                               const GradientImageType* gradientImage,
-                              const std::vector< typename TImageType::IndexType >& seeds,
-                              const std::vector< typename TImageType::IndexType >& sinks,
+                              std::vector< typename TImageType::IndexType > seeds,
+                              std::vector< typename TImageType::IndexType > sinks,
                               typename TImageType::Pointer& splittedSegmentationImage);
 
     static int mergeRegions(const std::vector< typename TImageType::RegionType >& regions,
@@ -129,7 +131,7 @@ class GraphCutsAdapter {
      */
     static int process(const TImageType* image,
                        const TImageType* segmentationImage,
-                       std::vector< typename TImageType::IndexType > seeds,
+                       const std::vector< typename TImageType::IndexType >& seeds,
                        std::vector< typename TImageType::IndexType > sinks,
                        typename ShapeLabelObjectType::Pointer& labelObject1,
                        typename ShapeLabelObjectType::Pointer& labelObject2);

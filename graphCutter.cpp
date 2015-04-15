@@ -184,8 +184,12 @@ int main( int argc, char* argv[] )
                                                     labelObject1,
                                                     labelObject2);
 
-  if(result == FUCKEDUP)
+  if(result == FUCKEDUP || result == YOUARENOTREADY)
     return EXIT_FAILURE;
+
+  //FIXME deal with MAYDAY better
+  if(result == JUSTONEOBJECT) //we only have one labelObject
+    labelObject2 = labelObject1;
 
   if(VerbosityConstant::verbosity >= VerbosityConstant::MEDIUM)
     std::cout << "LabelObjects to Image" << std::endl;
