@@ -60,10 +60,12 @@
 
 #include <ostream>
 #include <random>
+#include <limits>
 
 #include "verbosityConstant.h"
 
 #include "graphCutsAdapter.h"
+#include "maxflow/graph.h"
 
 //we assume that the input is a labelmap
 template< typename TImageType >
@@ -246,8 +248,8 @@ int GraphCutsAdapter< TImageType >::bilabelImage2LabelObjects(const TImageType* 
 //TODO avoid copy of std::vectors
 template< typename TImageType >
 int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentationImage,
-                                                   const GradientImageType* gradientImage,
-                                                   const std::vector< typename TImageType::IndexType >& seeds,
+                                                   const GradientImageType* weightsImage,
+                                                   const std::vector< typename TImageType::IndexType >& sources,
                                                    const std::vector< typename TImageType::IndexType >& sinks,
                                                    typename TImageType::Pointer& splittedSegmentationImage) {
 
@@ -258,7 +260,7 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
   //Just checking the gradient
   typedef itk::ImageFileWriter< GradientImageType > GradientWriterFilterType;
   typename GradientWriterFilterType::Pointer gwriter = GradientWriterFilterType::New();
-  gwriter->SetInput(gradientImage);
+  gwriter->SetInput(weightsImage);
   gwriter->SetFileName("gradient.tif");
   try {
     gwriter->Update();
@@ -266,13 +268,70 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
     std::cerr << __FILE__ << ":" << __LINE__ << "Error: " << error << std::endl;
     return FUCKEDUP;
   }
+  
+  // Get the region
+  const typename TImageType::RegionType& region = splittedSegmentationImage->GetBufferedRegion();
+  int num_nodes = region.GetNumberOfPixels();
 
-  //we don't have the graphcuts yet, so let's say the result ofthe graphcut is just the sinkSeedImage
-  for(int i = 0; i<seeds.size(); i++)
-    splittedSegmentationImage->SetPixel(seeds[i], 128);
+  // Create the graph
+  typedef typename GradientImageType::PixelType GraphDataT;
+  typedef Graph<GraphDataT, GraphDataT, GraphDataT> GraphT;
+  GraphT g(num_nodes, num_nodes*4);
+  g.add_node(num_nodes);
 
-  for(int i = 0; i<sinks.size(); i++)
-    splittedSegmentationImage->SetPixel(sinks[i], 255);
+  // Add non-terminal edges
+  itk::ImageRegionConstIteratorWithIndex<TImageType> segmentation_it(segmentationImage, region);
+  itk::ImageRegionConstIterator<GradientImageType> gradient_it(weightsImage, region);
+  int current_node = 0;
+  for(;!segmentation_it.IsAtEnd(); ++segmentation_it, ++gradient_it, ++current_node)
+  {
+    if(segmentation_it.Get() == 0)
+      continue;
+
+    GraphDataT gradient_value = gradient_it.Get();
+    const typename TImageType::IndexType& index = segmentation_it.GetIndex();
+    // Neighbors (assume that images are always 3-dimensional)
+    for(int n = 0; n < 3; ++n)
+    {
+        typename TImageType::IndexType nindex = index;
+        nindex[n] -= 1;
+
+        // TODO: Is it better ComputeOffsets or having an array of cached offsets?
+        int nnode = segmentationImage->ComputeOffset(nindex);
+        g.add_edge(current_node, nnode, gradient_value, gradient_value);
+    }
+  }
+
+  // Add terminal edges
+  const GraphDataT inf = std::numeric_limits<GraphDataT>::infinity();
+  typename std::vector<typename TImageType::IndexType>::const_iterator seeds_it;
+  for(seeds_it = sources.begin(); seeds_it != sources.end(); ++seeds_it)
+  {
+      int node = segmentationImage->ComputeOffset(*seeds_it);
+      g.add_tweights(node, 0, inf);
+  }
+  for(seeds_it = sinks.begin(); seeds_it != sinks.end(); ++seeds_it)
+  {
+      int node = segmentationImage->ComputeOffset(*seeds_it);
+      g.add_tweights(node, inf, 0);
+  }
+
+  // Maxflow aka graph-cut
+  g.maxflow();
+
+  // Write results to splittedSegmentationImage
+  segmentation_it.GoToBegin();
+  itk::ImageRegionIterator<TImageType> result_it(splittedSegmentationImage, region);
+  current_node = 0;
+  for(; !segmentation_it.IsAtEnd(); ++segmentation_it, ++result_it, ++current_node)
+  {
+      if(segmentation_it.Get() == 0)
+          result_it.Set(0);
+      else if(g.what_segment(current_node) == SOURCE)
+          result_it.Set(128);
+      else
+          result_it.Set(255);
+  }
 
   return NAILEDIT;
 }
