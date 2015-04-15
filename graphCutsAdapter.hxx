@@ -35,6 +35,7 @@
 #pragma once
 
 #include "itkImage.h"
+#include "itkImageIterator.h"
 #include "itkImageFileWriter.h"
 #include "itkImageFileReader.h"
 #include "itkImageRegionIterator.h"
@@ -106,6 +107,7 @@ int GraphCutsAdapter< TImageType >::getBoundingBox(const TImageType* segmentatio
   }
   return GraphCutsAdapter< TImageType >::getBoundingBox(binaryThresholdFilter->GetOutput(),
                                                         roi);
+  return NAILEDIT;
 }
 
 //we assume that there's only one connected component
@@ -223,7 +225,7 @@ int GraphCutsAdapter< TImageType >::bilabelImage2LabelObjects(const TImageType* 
 
   if(numObjects != 2) {
     std::cerr << numObjects << " !=2 objects present. Stop." << std::endl;
-    return FUCKEDUP;
+    return JUSTONEOBJECT;
   }
 
   typedef typename ImageToShapeLabelMapFilterType::OutputImageType::LabelObjectType LabelObjectType;
@@ -242,6 +244,8 @@ int GraphCutsAdapter< TImageType >::bilabelImage2LabelObjects(const TImageType* 
     std::cout << " Centroid "     << labelObject2->GetCentroid() << std::endl;
     std::cout << " Volume "       << labelObject2->GetPhysicalSize() << std::endl;
   }
+
+  return NAILEDIT;
 
 }
 
@@ -292,11 +296,12 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
     if(segmentation_it.Get() == 0)
       continue;
 
-    const GraphDataT& weight = weights_it.Get();
+    const GraphDataT weight = weights_it.Get(); // + 0.5;
     const typename TImageType::IndexType& index = segmentation_it.GetIndex();
     // Neighbors (assume that images are always 3-dimensional)
     for(int n = 0; n < 3; ++n)
     {
+        // Neighbour index
         typename TImageType::IndexType nindex = index;
         nindex[n] -= 1;
 
@@ -304,38 +309,27 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
         if(nindex[n] < 0)
             continue;
 
-        // TODO: Is it better ComputeOffsets or having an array of cached offsets?
+        // Is it better ComputeOffsets or having an array of cached offsets?
         int nnode = segmentationImage->ComputeOffset(nindex);
+//        if(n==2)
+//            g.add_edge(current_node, nnode, weight/4, weight/4);
+//        else
         g.add_edge(current_node, nnode, weight, weight);
     }
   }
 
   // Add terminal edges
-  const GraphDataT inf = 100000;//std::numeric_limits<GraphDataT>::max();
+  const GraphDataT inf = std::numeric_limits<GraphDataT>::infinity();
   typename std::vector<typename TImageType::IndexType>::const_iterator seeds_it;
   for(seeds_it = sources.begin(); seeds_it != sources.end(); ++seeds_it)
   {
       int node = segmentationImage->ComputeOffset(*seeds_it);
-      const typename TImageType::IndexType index1 = segmentationImage->ComputeIndex(node);
-      const typename TImageType::IndexType index2 = *seeds_it;
-      assert(index1 == index2);
-      typename TImageType::PixelType p = (*segmentationImage)[index1];
-      if(p != 0)
-      {
-        g.add_tweights(node, 0, inf);
-        std::cout << "si 1" << std::endl;
-      }
+      g.add_tweights(node, 0, inf);
   }
   for(seeds_it = sinks.begin(); seeds_it != sinks.end(); ++seeds_it)
   {
       int node = segmentationImage->ComputeOffset(*seeds_it);
-      const typename TImageType::IndexType index = segmentationImage->ComputeIndex(node);
-      typename TImageType::PixelType p = (*segmentationImage)[index];
-      if(p != 0)
-      {
-          g.add_tweights(node, inf, 0);
-          std::cout << "si 2" << std::endl;
-      }
+      g.add_tweights(node, inf, 0);
   }
 
   // Maxflow aka graph-cut
@@ -351,10 +345,8 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
   {
       if(segmentation_it.Get() == 0)
           result_it.Set(0);
-      else if(g.what_segment(current_node) == SOURCE)
-          result_it.Set(g.what_segment(current_node) == SOURCE ? 128 : 255);
       else
-          result_it.Set(255);
+          result_it.Set(g.what_segment(current_node) == SOURCE ? 128 : 255);
   }
 
   return NAILEDIT;
@@ -412,16 +404,20 @@ int GraphCutsAdapter< TImageType >::labelObjects2Image(ShapeLabelObjectType* lab
   }
   labelMapImage = label2volume->GetOutput();
 
+  return NAILEDIT;
 }
 
 template< typename TImageType >
 int GraphCutsAdapter< TImageType >::process(const TImageType* image,
                                             const TImageType* segmentationImage,
-                                            std::vector< typename TImageType::IndexType > seeds,
+                                            const std::vector< typename TImageType::IndexType >& seeds,
                                             std::vector< typename TImageType::IndexType > sinks,
                                             typename ShapeLabelObjectType::Pointer& labelObject1,
                                             typename ShapeLabelObjectType::Pointer& labelObject2) {
 
+  //if we allow Real Time seeds might yet not be both there
+  if(seeds.size() == 0 || sinks.size() == 0)
+    return YOUARENOTREADY;
 
   //extract cube
   typename TImageType::RegionType roi;
@@ -457,6 +453,40 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
     return FUCKEDUP;
   }
 
+  //remap coordinates
+  std::vector< typename TImageType::IndexType > remappedseeds;
+  std::vector< typename TImageType::IndexType > remappedsinks;
+  remappedseeds.reserve(seeds.size());
+  remappedsinks.reserve(sinks.size());
+
+  //FIXME find a way to transform offsets to indeces or a better way
+  // to remap the coordinates, this is ridiculous
+  // see http://public.kitware.com/pipermail/insight-developers/2006-December/008806.html
+  const typename TImageType::IndexType roiBeginIndex = roi.GetIndex();
+  for(unsigned int i=0; i < seeds.size(); i++) {
+    typename TImageType::OffsetType offset = seeds[i] - roiBeginIndex;
+    typename TImageType::IndexType remappedidx;
+    for(int dim = 0; dim < TImageType::ImageDimension; dim++)
+      remappedidx[dim] = offset[dim];
+    remappedseeds.push_back(remappedidx);
+  }
+  for(unsigned int i=0; i < sinks.size(); i++) {
+    typename TImageType::OffsetType offset = sinks[i] - roiBeginIndex;
+    typename TImageType::IndexType remappedidx;
+    for(int dim = 0; dim < TImageType::ImageDimension; dim++)
+      remappedidx[dim] = offset[dim];
+    remappedsinks.push_back(remappedidx);
+  }
+
+
+  //FIXME inverse of the gradient quick patch (make an itk filter out of this)
+  typename GradientImageType::Pointer gradientImage = GradientImageType::New();
+  gradientImage = gradientFilter->GetOutput();
+
+  itk::ImageRegionIterator< GradientImageType > it( gradientImage, gradientImage->GetRequestedRegion() );
+  for (it = it.Begin(); !it.IsAtEnd(); ++it)
+    it.Set( 1/(1+std::abs(it.Get()) ) );
+    //we can also use addition filter and inverse filter (si jamais)
 
   typename TImageType::Pointer segmentationROI = segmentationROIextractor->GetOutput();
   typename GradientImageType::Pointer gradient = gradientFilter->GetOutput();
@@ -475,11 +505,11 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   //temporary patch
   int result;
   {
-    result = dummygraphcuts(segmentationROI, gradient, seeds, sinks, cutSegmentationImage);
+    result = dummygraphcuts(segmentationROI, gradient, remappedseeds, remappedsinks, cutSegmentationImage);
   }
   //
   if(result == FUCKEDUP)
-    return FUCKEDUP;
+    return result;
   //
 
   if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
@@ -495,7 +525,10 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   }
 
   //Transform graphcut output to labelObjects
-  bilabelImage2LabelObjects(cutSegmentationImage, labelObject1, labelObject2);
+  result = bilabelImage2LabelObjects(cutSegmentationImage, labelObject1, labelObject2);
+
+  if(result == FUCKEDUP || result == JUSTONEOBJECT)
+    return result;
 
   //reset indexes
   typename ShapeLabelObjectType::RegionType region = labelObject1->GetBoundingBox();
