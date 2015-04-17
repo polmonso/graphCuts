@@ -372,11 +372,13 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   imageROIextractor->SetInput(image);
 
   //features
-  typedef itk::GradientMagnitudeRecursiveGaussianImageFilter<TImageType, ChanneledGradientImageType> GradientFilterType;
+  typedef itk::RecursiveGaussianImageFilter< TImageType, GradientImageType > GradientFilterType;
   typename GradientFilterType::Pointer gradientFilter = GradientFilterType::New();
   gradientFilter->SetInput(imageROIextractor->GetOutput());
   float sigma = 3.5; //TODO use 3.5, pass by parameter or what?
   gradientFilter->SetSigma( sigma );
+  gradientFilter->SetFirstOrder();
+  std::vector< typename GradientImageType::Pointer > gradients(TImageType::ImageDimension);
 
   typedef itk::RegionOfInterestImageFilter< TImageType, TImageType > ROIFilterType;
   typename ROIFilterType::Pointer segmentationROIextractor = ROIFilterType::New();
@@ -389,12 +391,18 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
     // unnecessary if we have pipeline
     // imageROIextractor->Update();
     //TODO load from disk if available
-    gradientFilter->Update();
-
+    for(unsigned int dim = 0; dim < TImageType::ImageDimension; dim++) {
+      gradientFilter->SetDirection(dim);
+      gradientFilter->Update();
+      gradients[dim] = gradientFilter->GetOutput();
+      gradients[dim]->DisconnectPipeline();
+    }
   } catch( itk::ExceptionObject & error ) {
     std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
     return FUCKEDUP;
   }
+
+  typename TImageType::Pointer segmentationROI = segmentationROIextractor->GetOutput();
 
   //remap coordinates
   std::vector< typename TImageType::IndexType > remappedseeds;
@@ -421,17 +429,6 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
     remappedsinks.push_back(remappedidx);
   }
 
-  typename TImageType::Pointer segmentationROI = segmentationROIextractor->GetOutput();
-
-  typename ChanneledGradientImageType::Pointer channeledGradientsImage = ChanneledGradientImageType::New();
-  channeledGradientsImage = gradientFilter->GetOutput();
-
-  const int dims = channeledGradientsImage->GetNumberOfComponentsPerPixel();
-
-  //FIXME inverse of the gradient quick patch (make an itk filter out of this)
-  if(VerbosityConstant::verbosity >= VerbosityConstant::MEDIUM)
-    std::cout << "compute " << dims << " gradients" << std::endl;
-
   //normalisation
 #define TESTSPACING 0
 #if TESTSPACING
@@ -443,41 +440,29 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   //TODO add the possibility to pass spacing as a parameter (as e.g. tif doesn't store it)
   const float zAnisotropyFactor = 2*spacing[2]/(spacing[0] + spacing[1]);
 
-  std::vector< typename GradientImageType::Pointer > gradients(dims);
-  std::vector< itk::ImageRegionIterator< GradientImageType > > gits(dims);
-  for(unsigned int dim = 0; dim < dims; dim++) {
-    typename GradientImageType::Pointer gradient = GradientImageType::New();
-    gradient->SetRegions(roi);
-    gradient->Allocate();
-    gradients[dim] = gradient;
-
-    itk::ImageRegionIterator< GradientImageType > git( gradient, gradient->GetRequestedRegion() );
-    gits[dim] = std::move(git);
-  }
-
-  assert(channeledGradientsImage->GetNumberOfComponentsPerPixel() == TImageType::ImageDimension);
   assert(TImageType::ImageDimension > 0);
-  assert(channeledGradientsImage->GetRequestedRegion().GetSize() == roi.GetSize());
+  const unsigned int dims = TImageType::ImageDimension;
   for(unsigned int dim = 0; dim < dims; dim++)
     assert(gradients[dim]->GetRequestedRegion().GetSize() == roi.GetSize());
 
-  itk::ImageRegionIterator< ChanneledGradientImageType > it( channeledGradientsImage, channeledGradientsImage->GetRequestedRegion() );
-
-  while( !it.IsAtEnd()) {
-    CoVectorType cov = it.Get();
-    for(unsigned int dim = 0; dim < dims-1; dim++) {
-      cov[dim] = 1/(1+std::abs(cov[dim]) + shapeWeight ) ;
-      gits[dim].Set(cov[dim]);
-      ++gits[dim];
+  //compute 1/p_z*(1/(1+|g|) + shapeWeight)
+  //we can also use addition filter and inverse filter (si jamais)
+  //x and y dimensions
+  for(unsigned int dim = 0; dim < dims-1; dim++) {
+    itk::ImageRegionIterator< GradientImageType > git( gradients[dim], gradients[dim]->GetRequestedRegion() );
+    while( !git.IsAtEnd()) {
+        git.Set( 1/(1+std::abs(git.Get())) + shapeWeight );
+        ++git;
     }
-    cov[dims-1] = (1/zAnisotropyFactor)*(1/(1+std::abs(cov[dims-1]) ) + shapeWeight );
-    gits[dims-1].Set(cov[dims-1]);
-    ++gits[dims-1];
+  }
 
-    it.Set(cov);
-    ++it;
-
-    //we can also use addition filter and inverse filter (si jamais)
+  //z dimension
+  {
+    itk::ImageRegionIterator< GradientImageType > git( gradients[dims-1], gradients[dims-1]->GetRequestedRegion() );
+    while( !git.IsAtEnd()) {
+      git.Set((1/zAnisotropyFactor)*(1/(1+std::abs(git.Get())) + shapeWeight ));
+      ++git;
+    }
   }
 
   if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
@@ -497,8 +482,6 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
       }
     }
   }
-
-
 
   //Do graphcuts
 
