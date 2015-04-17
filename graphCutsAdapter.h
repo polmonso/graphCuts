@@ -37,6 +37,9 @@ template< typename TImageType >
 class GraphCutsAdapter {
   public:
     typedef itk::Image<float, TImageType::ImageDimension > GradientImageType;
+    typedef itk::ImageFileWriter< GradientImageType > GradientWriterFilterType;
+    typedef itk::CovariantVector< float, TImageType::ImageDimension > CoVectorType;
+    typedef itk::Image< CoVectorType, TImageType::ImageDimension > ChanneledGradientImageType;
 
     typedef itk::ImageFileWriter< TImageType > WriterFilterType;
     typedef itk::ImageFileReader< TImageType > ReaderFilterType;
@@ -73,17 +76,17 @@ class GraphCutsAdapter {
      * A dummy method that replaces the graphcuts which would return the
      * splitted image
      *
-     * @param segmentationImage image with the image data (usually only the ROI)
-     * @param gradientImage image with the gradient of segmentationImage
-     * @param seeds coordinates of the graphcuts' seeds
-     * @param sinks coordinates of the graphcuts' sinks
+     * @param segmentationImage         image with the image data (usually only the ROI)
+     * @param scoreImages               image with the gradient of segmentationImage, components x,y and z.
+     * @param seeds                     coordinates of the graphcuts' seeds
+     * @param sinks                     coordinates of the graphcuts' sinks
      * @param splittedSegmentationImage output image with the splitted segmentation, that is,
      * two segmentations with two different labels or two connected components separated by
      * a background value pixel (not fully connected)
      * @return -1 on failure, 0 on success
      */
     static int dummygraphcuts(const TImageType* segmentationImage,
-                              const GradientImageType* gradientImage,
+                              const std::vector< typename GradientImageType::Pointer >& scoreImages,
                               std::vector< typename TImageType::IndexType > seeds,
                               std::vector< typename TImageType::IndexType > sinks,
                               typename TImageType::Pointer& splittedSegmentationImage);
@@ -122,19 +125,22 @@ class GraphCutsAdapter {
                                   ShapeLabelObjectType* labelObject2,
                                   typename TImageType::Pointer& labelMapImage);
     /**
-     * @param image with the original image data
-     * @param segmentationImage with the selected segmentation to split
-     * @param seeds vector of coordinates for the seeds
-     * @param seeds vector of coordinates for the sinks
-     * @param labelObject1 output label object
-     * @param labelObject1 output label object
+     * @param image             image with the original image data
+     * @param segmentationImage image with the selected segmentation to split
+     * @param seeds             vector of coordinates for the seeds
+     * @param seeds             vector of coordinates for the sinks
+     * @param labelObject1      output label object
+     * @param labelObject1      output label object
+     * @param shapeWeight       value added to the weight to favor shape uniformity:
+     *                          1/p_z*(1/(1+|g|) + shapeWeight)
      */
     static int process(const TImageType* image,
                        const TImageType* segmentationImage,
                        const std::vector< typename TImageType::IndexType >& seeds,
                        std::vector< typename TImageType::IndexType > sinks,
                        typename ShapeLabelObjectType::Pointer& labelObject1,
-                       typename ShapeLabelObjectType::Pointer& labelObject2);
+                       typename ShapeLabelObjectType::Pointer& labelObject2,
+                       float shapeWeight = 0);
   };
 
 #ifndef ITK_MANUAL_INSTANTIATION

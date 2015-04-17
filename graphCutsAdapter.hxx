@@ -250,7 +250,7 @@ int GraphCutsAdapter< TImageType >::bilabelImage2LabelObjects(const TImageType* 
 //TODO avoid copy of std::vectors
 template< typename TImageType >
 int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentationImage,
-                                                   const GradientImageType* gradientImage,
+                                                   const std::vector< typename GradientImageType::Pointer >& scoreImages,
                                                    std::vector< typename TImageType::IndexType > remappedseeds,
                                                    std::vector< typename TImageType::IndexType > remappedsinks,
                                                    typename TImageType::Pointer& splittedSegmentationImage) {
@@ -265,13 +265,16 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
   if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
     typedef itk::ImageFileWriter< GradientImageType > GradientWriterFilterType;
     typename GradientWriterFilterType::Pointer gwriter = GradientWriterFilterType::New();
-    gwriter->SetInput(gradientImage);
-    gwriter->SetFileName("gradient.tif");
-    try {
-      gwriter->Update();
-    } catch( itk::ExceptionObject & error ) {
-      std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
-      return FUCKEDUP;
+
+    for(unsigned int i = 0; i < scoreImages.size() ; i++) {
+      gwriter->SetInput(scoreImages[i]);
+      gwriter->SetFileName("gradient" + std::to_string(i) + ".mha");
+      try {
+        gwriter->Update();
+      } catch( itk::ExceptionObject & error ) {
+        std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
+        return FUCKEDUP;
+      }
     }
   }
 
@@ -352,7 +355,8 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
                                             const std::vector< typename TImageType::IndexType >& seeds,
                                             std::vector< typename TImageType::IndexType > sinks,
                                             typename ShapeLabelObjectType::Pointer& labelObject1,
-                                            typename ShapeLabelObjectType::Pointer& labelObject2) {
+                                            typename ShapeLabelObjectType::Pointer& labelObject2,
+                                            float shapeWeight) {
 
   //if we allow Real Time seeds might yet not be both there
   if(seeds.size() == 0 || sinks.size() == 0)
@@ -368,7 +372,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   imageROIextractor->SetInput(image);
 
   //features
-  typedef itk::GradientMagnitudeRecursiveGaussianImageFilter<TImageType, GradientImageType> GradientFilterType;
+  typedef itk::GradientMagnitudeRecursiveGaussianImageFilter<TImageType, ChanneledGradientImageType> GradientFilterType;
   typename GradientFilterType::Pointer gradientFilter = GradientFilterType::New();
   gradientFilter->SetInput(imageROIextractor->GetOutput());
   float sigma = 3.5; //TODO use 3.5, pass by parameter or what?
@@ -417,18 +421,84 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
     remappedsinks.push_back(remappedidx);
   }
 
+  typename TImageType::Pointer segmentationROI = segmentationROIextractor->GetOutput();
+
+  typename ChanneledGradientImageType::Pointer channeledGradientsImage = ChanneledGradientImageType::New();
+  channeledGradientsImage = gradientFilter->GetOutput();
+
+  const int dims = channeledGradientsImage->GetNumberOfComponentsPerPixel();
 
   //FIXME inverse of the gradient quick patch (make an itk filter out of this)
-  typename GradientImageType::Pointer gradientImage = GradientImageType::New();
-  gradientImage = gradientFilter->GetOutput();
+  if(VerbosityConstant::verbosity >= VerbosityConstant::MEDIUM)
+    std::cout << "compute " << dims << " gradients" << std::endl;
 
-  itk::ImageRegionIterator< GradientImageType > it( gradientImage, gradientImage->GetRequestedRegion() );
-  for (it = it.Begin(); !it.IsAtEnd(); ++it)
-    it.Set( 1/(1+std::abs(it.Get()) ) );
+  //normalisation
+#define TESTSPACING 0
+#if TESTSPACING
+  typename TImageType::SpacingType spacing = image->GetSpacing();
+  spacing[2] = 5;
+#else
+  const typename TImageType::SpacingType spacing = image->GetSpacing();
+#endif
+  //TODO add the possibility to pass spacing as a parameter (as e.g. tif doesn't store it)
+  const float zAnisotropyFactor = 2*spacing[2]/(spacing[0] + spacing[1]);
+
+  std::vector< typename GradientImageType::Pointer > gradients(dims);
+  std::vector< itk::ImageRegionIterator< GradientImageType > > gits(dims);
+  for(unsigned int dim = 0; dim < dims; dim++) {
+    typename GradientImageType::Pointer gradient = GradientImageType::New();
+    gradient->SetRegions(roi);
+    gradient->Allocate();
+    gradients[dim] = gradient;
+
+    itk::ImageRegionIterator< GradientImageType > git( gradient, gradient->GetRequestedRegion() );
+    gits[dim] = std::move(git);
+  }
+
+  assert(channeledGradientsImage->GetNumberOfComponentsPerPixel() == TImageType::ImageDimension);
+  assert(TImageType::ImageDimension > 0);
+  assert(channeledGradientsImage->GetRequestedRegion().GetSize() == roi.GetSize());
+  for(unsigned int dim = 0; dim < dims; dim++)
+    assert(gradients[dim]->GetRequestedRegion().GetSize() == roi.GetSize());
+
+  itk::ImageRegionIterator< ChanneledGradientImageType > it( channeledGradientsImage, channeledGradientsImage->GetRequestedRegion() );
+
+  while( !it.IsAtEnd()) {
+    CoVectorType cov = it.Get();
+    for(unsigned int dim = 0; dim < dims-1; dim++) {
+      cov[dim] = 1/(1+std::abs(cov[dim]) + shapeWeight ) ;
+      gits[dim].Set(cov[dim]);
+      ++gits[dim];
+    }
+    cov[dims-1] = (1/zAnisotropyFactor)*(1/(1+std::abs(cov[dims-1]) ) + shapeWeight );
+    gits[dims-1].Set(cov[dims-1]);
+    ++gits[dims-1];
+
+    it.Set(cov);
+    ++it;
+
     //we can also use addition filter and inverse filter (si jamais)
+  }
 
-  typename TImageType::Pointer segmentationROI = segmentationROIextractor->GetOutput();
-  typename GradientImageType::Pointer gradient = gradientFilter->GetOutput();
+  if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
+
+    std::cout << "Gradients computed. Saving." << std::endl;
+
+    for(unsigned int dim = 0; dim < dims; dim++) {
+
+      typename GradientWriterFilterType::Pointer writer = GradientWriterFilterType::New();
+      writer->SetInput(gradients[dim]);
+      writer->SetFileName("gradient" + std::to_string(dim) + ".tif");
+      try {
+        writer->Update();
+      } catch( itk::ExceptionObject & error ) {
+        std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
+        return FUCKEDUP;
+      }
+    }
+  }
+
+
 
   //Do graphcuts
 
@@ -444,7 +514,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   //temporary patch
   int result;
   {
-    result = dummygraphcuts(segmentationROI, gradient, remappedseeds, remappedsinks, cutSegmentationImage);
+    result = dummygraphcuts(segmentationROI, gradients, remappedseeds, remappedsinks, cutSegmentationImage);
   }
   //
   if(result == FUCKEDUP)
