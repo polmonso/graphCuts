@@ -92,32 +92,30 @@ class GraphCutsAdapter {
                               typename TImageType::Pointer& splittedSegmentationImage);
 
     static int mergeRegions(const std::vector< typename TImageType::RegionType >& regions,
-                            typename TImageType::RegionType& region){
+                            typename TImageType::RegionType& mergedRegion) {
 
-#warning check that this is correct, and maybe there's a better way. '
-
-      typename TImageType::IndexType index = regions[0].GetIndex();
-      typename TImageType::SizeType size = regions[0].GetSize();
-
-      typename TImageType::IndexType indexE = regions[0].GetIndex() + size;
+      typename TImageType::IndexType index    = regions[0].GetIndex();
+      typename TImageType::SizeType  size     = regions[0].GetSize();
+      typename TImageType::IndexType indexEnd = regions[0].GetIndex() + size;
 
       for(auto region : regions)
       {
-
-        typename TImageType::IndexType indexAux = region.GetIndex() + region.GetSize();
-
+        typename TImageType::IndexType indexAux = region.GetIndex();
+        typename TImageType::IndexType indexEndAux = region.GetIndex() + region.GetSize();
         for(unsigned int dim = 0; dim < TImageType::ImageDimension; dim++)
         {
-          index[dim] = std::min(region.GetIndex()[dim], index[dim]);
-          indexE[dim] = std::max(indexAux[dim], indexE[dim]);
+          index[dim]    = std::min(indexAux[dim], index[dim]);
+          indexEnd[dim] = std::max(indexEndAux[dim], indexEnd[dim]);
         }
       }
 
       for(unsigned int dim = 0; dim < TImageType::ImageDimension; dim++)
-        size[dim] = indexE[dim] - index[dim];
+      {
+        size[dim] = indexEnd[dim] - index[dim];
+      }
 
-      region.SetIndex(index);
-      region.SetSize(size);
+      mergedRegion.SetIndex(index);
+      mergedRegion.SetSize(size);
 
     }
 

@@ -316,10 +316,9 @@ int GraphCutsAdapter< TImageType >::labelObjects2Image(ShapeLabelObjectType* lab
   typename TImageType::SpacingType spacing = labelMapImage->GetSpacing();
 
   if(region.GetSize()[0] == 0) {
-    std::cerr << "label image not allocated. Using labelobjects boundingbox." << std::endl;
+    std::cerr << "Label image not allocated. Using labelobjects boundingbox." << std::endl;
     mergeRegions(std::vector<typename TImageType::RegionType>{labelObject1->GetBoundingBox(), labelObject2->GetBoundingBox()}, region);
   }
-
 
   auto segLabelMap = LabelMapType::New();
   segLabelMap->SetSpacing(spacing);
@@ -330,9 +329,6 @@ int GraphCutsAdapter< TImageType >::labelObjects2Image(ShapeLabelObjectType* lab
   labelObject2->SetLabel(itk::NumericTraits< typename TImageType::PixelType >::max()/2);
 
   segLabelMap->AddLabelObject(labelObject1);
-
-  std::cout << "labelObject1 bounding box " << labelObject1->GetBoundingBox() << std::endl;
-
   segLabelMap->AddLabelObject(labelObject2);
 
   auto label2volume = Label2VolumeFilter::New();
@@ -487,13 +483,6 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
 
   typename TImageType::Pointer cutSegmentationImage = TImageType::New();
 
-  //if we want registration on the labelMap.tif (written below) uncomment this and comment
-  //graphCutsAdapter.h:dummygraphcuts():243 :244
-  //otherwise only the size of the labels is allocated and therefore sizeCut < sizeImage
-  //which is irrellevant if we are only interested in the labelObjects' region position indexes
-  //cutSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
-  //cutSegmentationImage->Allocate();
-
   //temporary patch
   int result;
   {
@@ -502,7 +491,6 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   //
   if(result == FUCKEDUP)
     return result;
-  //
 
   if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
     typename WriterFilterType::Pointer writer = WriterFilterType::New();
@@ -522,40 +510,15 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   if(result == FUCKEDUP || result == JUSTONEOBJECT)
     return result;
 
-  //reset indexes
-  typename ShapeLabelObjectType::RegionType region = labelObject1->GetBoundingBox();
-  //      typename TImageType::PointType point;
-  //      typename TImageType::IndexType index;
-  typename TImageType::OffsetType offset;
-  typename TImageType::IndexType index = roi.GetIndex();
-
-  for(unsigned int i = 0; i < TImageType::ImageDimension; i++)
-    offset[i] = index[i];
-  typename TImageType::IndexType newindex = region.GetIndex() + offset;
-
-  std::cout << "bounding box " << region << " roi " << roi << " new index " << newindex << std::endl;
-
-  //      //region.GetIndex() will always be [0,0,0], but anyway.
-  //      segmentationROI->TransformIndexToPhysicalPoint(region.GetIndex(), point);
-  //      segmentationImage->TransformPhysicalPointToIndex(point, index);
-  region.SetIndex(newindex);
-  labelObject1->SetBoundingBox(region);
-
   if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
 
     typename TImageType::Pointer labelMapImage = TImageType::New();
-#ifndef TESTAUTOMATICMERGEOFLABELS
-    labelMapImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
-    labelMapImage->Allocate();
-    labelMapImage->FillBuffer(0);
-#endif
 
     labelObjects2Image(labelObject1, labelObject2, labelMapImage);
 
     typename WriterFilterType::Pointer writer = WriterFilterType::New();
-    writer->SetFileName("labelMap.tif");
+    writer->SetFileName("ROILabelMap.tif");
     writer->SetInput(labelMapImage);
-
     try {
       writer->Update();
     } catch( itk::ExceptionObject & error ) {
@@ -564,6 +527,30 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
     }
   }
 
+  //reset the indexes to its original Region
+  typename TImageType::OffsetType offset;
+  typename TImageType::IndexType index = roi.GetIndex();
+  for(unsigned int i = 0; i < TImageType::ImageDimension; i++)
+    offset[i] = index[i];
+
+#warning Shift doesn't work correctly given that \
+  it does not change the bounding box. \
+  Setting the boundingbox does not work either, \
+  given that the indexes of the pixels remain unchanged. \
+  Therefore, we do both until the bug is solved.
+
+#define USESHIFT
+#ifdef USESHIFT
+  labelObject1->Shift(offset);
+  labelObject2->Shift(offset);
+//#else
+  typename TImageType::RegionType region1 = labelObject1->GetBoundingBox();
+  region1.GetModifiableIndex() += offset;
+  labelObject1->SetBoundingBox(region1);
+  typename TImageType::RegionType region2 = labelObject2->GetBoundingBox();
+  region2.GetModifiableIndex() += offset;
+  labelObject2->SetBoundingBox(region2);
+#endif
   return NAILEDIT;
 
 }
