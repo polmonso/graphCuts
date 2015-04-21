@@ -134,6 +134,20 @@ int main( int argc, char* argv[] )
   typename itkVolumeType::Pointer segmentationImage = segmentationReader->GetOutput();
   typename itkVolumeType::Pointer seedSinkImage = seedSinkReader->GetOutput();
 
+  if(zspacing != 1.0) {
+    //Note that if we read a mha file the zspacing will be 1.0 by default (no parameter inputed)
+    //so the image spacings will be already correct, we will skip this step
+    typename itkVolumeType::SpacingType spacing;
+    spacing[0] = 1.0;
+    spacing[1] = 1.0;
+    spacing[2] = zspacing;
+    std::cout << "Setting spacing to " << spacing << std::endl;
+
+    image->SetSpacing(spacing);
+    segmentationImage->SetSpacing(spacing);
+    seedSinkImage->SetSpacing(spacing);
+  }
+
   //test indices mixup
   itk::ImageRegionIterator<itkVolumeType> imageIterator(seedSinkImage, seedSinkImage->GetLargestPossibleRegion());
 
