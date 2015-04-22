@@ -254,7 +254,7 @@ int main( int argc, char* argv[] )
   }
 #endif
 
-  visualize< itkVolumeType >(volume);
+  // visualize< itkVolumeType >(volume);
 
   if(result == FUCKEDUP)
     return EXIT_FAILURE;

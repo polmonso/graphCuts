@@ -61,10 +61,12 @@
 
 #include <ostream>
 #include <random>
+#include <limits>
 
 #include "verbosityConstant.h"
 
 #include "graphCutsAdapter.h"
+#include "maxflow/graph.h"
 
 //we assume that the input is a labelmap
 template< typename TImageType >
@@ -247,17 +249,13 @@ int GraphCutsAdapter< TImageType >::bilabelImage2LabelObjects(const TImageType* 
 
 }
 
-//TODO avoid copy of std::vectors
 template< typename TImageType >
 int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentationImage,
-                                                   const std::vector< typename GradientImageType::Pointer >& scoreImages,
-                                                   std::vector< typename TImageType::IndexType > remappedseeds,
-                                                   std::vector< typename TImageType::IndexType > remappedsinks,
-                                                   typename TImageType::Pointer& splittedSegmentationImage) {
-
-  assert(segmentationImage->GetLargestPossibleRegion().GetSize()[0] > 0);
-
-  //TODO maybe it's ok to delegate the allocation to the client
+                                              const std::vector< typename GradientImageType::Pointer >& scoreImages,
+                                              const std::vector< typename TImageType::IndexType >& sources,
+                                              const std::vector< typename TImageType::IndexType >& sinks,
+                                              typename TImageType::Pointer& splittedSegmentationImage) {
+  //TODO remove when computing boundingbox is ready
   splittedSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
   splittedSegmentationImage->Allocate();
 
@@ -265,7 +263,6 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
   if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
     typedef itk::ImageFileWriter< GradientImageType > GradientWriterFilterType;
     typename GradientWriterFilterType::Pointer gwriter = GradientWriterFilterType::New();
-
     for(unsigned int i = 0; i < scoreImages.size() ; i++) {
       gwriter->SetInput(scoreImages[i]);
       gwriter->SetFileName("gradient" + std::to_string(i) + ".mha");
@@ -279,17 +276,101 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
   }
 
   //we don't have the graphcuts yet, so let's say the result ofthe graphcut is just the sinkSeedImage
+  for(int i = 0; i<sources.size(); i++)
+    splittedSegmentationImage->SetPixel(sources[i], 128);
 
+  for(int i = 0; i<sinks.size(); i++)
+    splittedSegmentationImage->SetPixel(sinks[i], 255);
+
+  return NAILEDIT;
+}
+
+//TODO avoid copy of std::vectors
+template< typename TImageType >
+int GraphCutsAdapter< TImageType >::graphcuts(const TImageType* segmentationImage,
+                                              const std::vector< typename GradientImageType::Pointer >& scoreImages,
+                                              const std::vector< typename TImageType::IndexType >& sources,
+                                              const std::vector< typename TImageType::IndexType >& sinks,
+                                              typename TImageType::Pointer& splittedSegmentationImage) {
+
+  assert(segmentationImage->GetLargestPossibleRegion().GetSize()[0] > 0);
+
+  //TODO maybe it's ok to delegate the allocation to the client
+  splittedSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
+  splittedSegmentationImage->Allocate();
+
+  // Get the region
+  const typename TImageType::RegionType& region = splittedSegmentationImage->GetBufferedRegion();
+  int num_nodes = region.GetNumberOfPixels();
+
+  // Create the graph
+  typedef typename GradientImageType::PixelType GraphDataT;
+  typedef Graph<GraphDataT, GraphDataT, GraphDataT> GraphT;
+  GraphT g(num_nodes, num_nodes*6);
+  g.add_node(num_nodes);
+
+  // Add non-terminal edges
+  itk::ImageRegionConstIteratorWithIndex<TImageType> segmentation_it(segmentationImage, region);
+  int current_node = 0;
+  
+  // Initialize iterators for score images.
+  std::array<itk::ImageRegionConstIterator<GradientImageType>, TImageType::ImageDimension> scores_its;
+  for(int n = 0; n < TImageType::ImageDimension; ++n)
+    scores_its[n] = itk::ImageRegionConstIterator<GradientImageType>(scoreImages[n], region);
+  for(;!segmentation_it.IsAtEnd(); ++segmentation_it, ++current_node,
+          std::for_each(scores_its.begin(), scores_its.end(), [](itk::ImageRegionConstIterator<GradientImageType>& p){++p;}))
+  {
+    if(segmentation_it.Get() == 0)
+      continue;
+
+    const typename TImageType::IndexType& index = segmentation_it.GetIndex();
+    for(int n = 0; n < TImageType::ImageDimension; ++n)
+    {
+        // Neighbour index
+        typename TImageType::IndexType nindex = index;
+        nindex[n] -= 1;
+
+        // Check if neighbour is out of bounds
+        if(nindex[n] < 0)
+            continue;
+
+        // Is it better ComputeOffsets or having an array of cached offsets?
+        const GraphDataT weight = scores_its[n].Get(); // + 0.5;
+        int nnode = segmentationImage->ComputeOffset(nindex);
+        g.add_edge(current_node, nnode, weight, weight);
+    }
+  }
+
+  // Add terminal edges
+  const GraphDataT inf = std::numeric_limits<GraphDataT>::infinity();
+  typename std::vector<typename TImageType::IndexType>::const_iterator seeds_it;
+  for(seeds_it = sources.begin(); seeds_it != sources.end(); ++seeds_it)
+  {
+      int node = segmentationImage->ComputeOffset(*seeds_it);
+      g.add_tweights(node, 0, inf);
+  }
+  for(seeds_it = sinks.begin(); seeds_it != sinks.end(); ++seeds_it)
+  {
+      int node = segmentationImage->ComputeOffset(*seeds_it);
+      g.add_tweights(node, inf, 0);
+  }
+
+  // Maxflow aka graph-cut
+  GraphDataT energy = g.maxflow();
   if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH)
-    std::cout << "Seeds " << remappedseeds.size() << " Sinks " << remappedsinks.size() << std::endl;
+      std::cout << "Energy of the cut: " << energy << std::endl;
 
-  assert(remappedseeds.size() > 0 && remappedsinks.size() > 0);
-
-  for(int i = 0; i<remappedseeds.size(); i++)
-    splittedSegmentationImage->SetPixel(remappedseeds[i], 128);
-
-  for(int i = 0; i<remappedsinks.size(); i++)
-    splittedSegmentationImage->SetPixel(remappedsinks[i], 255);
+  // Write results to splittedSegmentationImage
+  segmentation_it.GoToBegin();
+  itk::ImageRegionIterator<TImageType> result_it(splittedSegmentationImage, region);
+  current_node = 0;
+  for(; !segmentation_it.IsAtEnd(); ++segmentation_it, ++result_it, ++current_node)
+  {
+      if(segmentation_it.Get() == 0)
+          result_it.Set(0);
+      else
+          result_it.Set(g.what_segment(current_node) == SOURCE ? 128 : 255);
+  }
 
   return NAILEDIT;
 }
@@ -368,12 +449,12 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   imageROIextractor->SetInput(image);
 
   //features
-  typedef itk::RecursiveGaussianImageFilter< TImageType, GradientImageType > GradientFilterType;
+  typedef itk::GradientMagnitudeRecursiveGaussianImageFilter< TImageType, GradientImageType > GradientFilterType;
   typename GradientFilterType::Pointer gradientFilter = GradientFilterType::New();
   gradientFilter->SetInput(imageROIextractor->GetOutput());
   float sigma = 3.5; //TODO use 3.5, pass by parameter or what?
   gradientFilter->SetSigma( sigma );
-  gradientFilter->SetFirstOrder();
+  // gradientFilter->SetFirstOrder();
   std::vector< typename GradientImageType::Pointer > gradients(TImageType::ImageDimension);
 
   typedef itk::RegionOfInterestImageFilter< TImageType, TImageType > ROIFilterType;
@@ -387,8 +468,9 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
     // unnecessary if we have pipeline
     // imageROIextractor->Update();
     //TODO load from disk if available
+    
     for(unsigned int dim = 0; dim < TImageType::ImageDimension; dim++) {
-      gradientFilter->SetDirection(dim);
+      // gradientFilter->SetDirection(dim);
       gradientFilter->Update();
       gradients[dim] = gradientFilter->GetOutput();
       gradients[dim]->DisconnectPipeline();
@@ -437,26 +519,35 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   const float zAnisotropyFactor = 2*spacing[2]/(spacing[0] + spacing[1]);
 
   assert(TImageType::ImageDimension > 0);
-  const unsigned int dims = TImageType::ImageDimension;
+  constexpr unsigned int dims = TImageType::ImageDimension;
   for(unsigned int dim = 0; dim < dims; dim++)
     assert(gradients[dim]->GetRequestedRegion().GetSize() == roi.GetSize());
 
-  //compute 1/p_z*(1/(1+|g|) + shapeWeight)
+  //compute 1/p_z*(1/(1+|g|^2) + shapeWeight)
   //we can also use addition filter and inverse filter (si jamais)
   //x and y dimensions
   for(unsigned int dim = 0; dim < dims-1; dim++) {
     itk::ImageRegionIterator< GradientImageType > git( gradients[dim], gradients[dim]->GetRequestedRegion() );
     while( !git.IsAtEnd()) {
-        git.Set( 1/(1+std::abs(git.Get())) + shapeWeight );
+        const typename GradientImageType::PixelType pixel = git.Get();
+        git.Set( 1/(1 + pixel*pixel) + shapeWeight );
         ++git;
     }
   }
 
   //z dimension
   {
-    itk::ImageRegionIterator< GradientImageType > git( gradients[dims-1], gradients[dims-1]->GetRequestedRegion() );
+    // Errors of the cut in the Z-axis seem to be harder to fix manually than those 
+    // in the X and Y axes.
+    // Make cuts in the Z-axis more likely even when the anisotropy factor is 1.
+    // TODO: parameter?
+    const typename GradientImageType::PixelType zfactor = 1 / (5 * zAnisotropyFactor);
+    
+    constexpr unsigned int dim = dims - 1;
+    itk::ImageRegionIterator< GradientImageType > git( gradients[dim], gradients[dim]->GetRequestedRegion() );
     while( !git.IsAtEnd()) {
-      git.Set((1/zAnisotropyFactor)*(1/(1+std::abs(git.Get())) + shapeWeight ));
+      const typename GradientImageType::PixelType pixel = git.Get();
+      git.Set(zfactor * (1/(1 + pixel*pixel) + shapeWeight ));
       ++git;
     }
   }
@@ -486,7 +577,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   //temporary patch
   int result;
   {
-    result = dummygraphcuts(segmentationROI, gradients, remappedseeds, remappedsinks, cutSegmentationImage);
+    result = graphcuts(segmentationROI, gradients, remappedseeds, remappedsinks, cutSegmentationImage);
   }
   //
   if(result == FUCKEDUP)

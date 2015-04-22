@@ -87,8 +87,13 @@ class GraphCutsAdapter {
      */
     static int dummygraphcuts(const TImageType* segmentationImage,
                               const std::vector< typename GradientImageType::Pointer >& scoreImages,
-                              std::vector< typename TImageType::IndexType > seeds,
-                              std::vector< typename TImageType::IndexType > sinks,
+                              const std::vector< typename TImageType::IndexType >& sources,
+                              const std::vector< typename TImageType::IndexType >& sinks,
+                              typename TImageType::Pointer& splittedSegmentationImage);
+    static int graphcuts(const TImageType* segmentationImage,
+                              const std::vector< typename GradientImageType::Pointer >& scoreImages,
+                              const std::vector< typename TImageType::IndexType >& sources,
+                              const std::vector< typename TImageType::IndexType >& sinks,
                               typename TImageType::Pointer& splittedSegmentationImage);
 
     static int mergeRegions(const std::vector< typename TImageType::RegionType >& regions,

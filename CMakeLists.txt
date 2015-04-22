@@ -17,7 +17,7 @@ endif()
  
 include_directories( BEFORE ~/code/tclap-1.2.1/include )
 
-set(MAXFLOW_SRC )
+set(MAXFLOW_SRC maxflow/maxflow.cpp)
 set(MAXFLOW_HDR )
 
 set(MAXFLOW_INCLUDE_DIRS maxflow)
@@ -33,7 +33,7 @@ set(GRAPHCUTS_HEADERS graphCutsAdapter.h
 #add_library(graphCuts ${GRAPHCUTS_HEADERS})
 #set_target_properties(graphCuts PROPERTIES LINKER_LANGUAGE CXX)
 
-add_executable(graphCutter graphCutter.cpp ${GRAPHCUTS_HEADERS})
+add_executable(graphCutter graphCutter.cpp ${MAXFLOW_SRC} ${GRAPHCUTS_HEADERS})
 target_link_libraries(graphCutter
                       #graphCuts
-                      ${Glue} ${VTK_LIBRARIES} ${ITK_LIBRARIES})
+                      ${Glue} ${ITK_LIBRARIES} ${VTK_LIBRARIES})
