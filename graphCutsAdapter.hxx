@@ -255,7 +255,34 @@ int GraphCutsAdapter< TImageType >::dummygraphcuts(const TImageType* segmentatio
                                               const std::vector< typename TImageType::IndexType >& sources,
                                               const std::vector< typename TImageType::IndexType >& sinks,
                                               typename TImageType::Pointer& splittedSegmentationImage) {
-  
+  //TODO remove when computing boundingbox is ready
+  splittedSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
+  splittedSegmentationImage->Allocate();
+
+  //Just checking the gradient
+  if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
+    typedef itk::ImageFileWriter< GradientImageType > GradientWriterFilterType;
+    typename GradientWriterFilterType::Pointer gwriter = GradientWriterFilterType::New();
+    for(unsigned int i = 0; i < scoreImages.size() ; i++) {
+      gwriter->SetInput(scoreImages[i]);
+      gwriter->SetFileName("gradient" + std::to_string(i) + ".mha");
+      try {
+        gwriter->Update();
+      } catch( itk::ExceptionObject & error ) {
+        std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
+        return FUCKEDUP;
+      }
+    }
+  }
+
+  //we don't have the graphcuts yet, so let's say the result ofthe graphcut is just the sinkSeedImage
+  for(int i = 0; i<sources.size(); i++)
+    splittedSegmentationImage->SetPixel(sources[i], 128);
+
+  for(int i = 0; i<sinks.size(); i++)
+    splittedSegmentationImage->SetPixel(sinks[i], 255);
+
+  return NAILEDIT;
 }
 
 //TODO avoid copy of std::vectors
@@ -520,7 +547,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   for(unsigned int dim = 0; dim < dims-1; dim++) {
     itk::ImageRegionIterator< GradientImageType > git( gradients[dim], gradients[dim]->GetRequestedRegion() );
     while( !git.IsAtEnd()) {
-        git.Set( 1/(1+std::abs(git.Get())) + shapeWeight );
+        git.Set( 1/(1 + std::abs(git.Get())) + shapeWeight );
         ++git;
     }
   }
@@ -529,7 +556,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   {
     itk::ImageRegionIterator< GradientImageType > git( gradients[dims-1], gradients[dims-1]->GetRequestedRegion() );
     while( !git.IsAtEnd()) {
-      git.Set((1/zAnisotropyFactor)*(1/(1+std::abs(git.Get())) + shapeWeight ));
+      git.Set((1/zAnisotropyFactor) * (1/(1 + std::abs(git.Get())) + shapeWeight ));
       ++git;
     }
   }
@@ -566,7 +593,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   //temporary patch
   int result;
   {
-    result = dummygraphcuts(segmentationROI, gradients, remappedseeds, remappedsinks, cutSegmentationImage);
+    result = graphcuts(segmentationROI, gradients, remappedseeds, remappedsinks, cutSegmentationImage);
   }
   //
   if(result == FUCKEDUP)
