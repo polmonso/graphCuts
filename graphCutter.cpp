@@ -148,22 +148,23 @@ int main( int argc, char* argv[] )
     seedSinkImage->SetSpacing(spacing);
   }
 
+//#define testindices
+#ifdef testindices
   //test indices mixup
   itk::ImageRegionIterator<itkVolumeType> imageIterator(seedSinkImage, seedSinkImage->GetLargestPossibleRegion());
 
-  itkVolumeType::IndexType index;
+  itkVolumeType::IndexType originalIndex;
   while(!imageIterator.IsAtEnd())
   {
     itkVolumeType::PixelType pix = imageIterator.Get();
     if(pix == 255) {
-      index = imageIterator.GetIndex();
+      originalIndex = imageIterator.GetIndex();
       break;
     }
     ++imageIterator;
-
   }
-  std::cout << "Index: " << index << std::endl;
   //done indeces check
+#endif
 
   //todo use pointers
   std::vector< typename itkVolumeType::IndexType > seeds;
@@ -182,15 +183,10 @@ int main( int argc, char* argv[] )
 
   GCA::ShapeLabelObjectType::Pointer labelObject1 = GCA::ShapeLabelObjectType::New();
   GCA::ShapeLabelObjectType::Pointer labelObject2 = GCA::ShapeLabelObjectType::New();
-  //  typename ShapeLabelObjectType::Pointer labelObject1 = ShapeLabelObjectType::New();
-  //  typename ShapeLabelObjectType::Pointer labelObject2 = ShapeLabelObjectType::New();
 
   if(VerbosityConstant::verbosity >= VerbosityConstant::MEDIUM)
     std::cout << "Process" << std::endl;
 
-  //FIXME TODO we might be messing with the indexes.
-  // Registration won't work and it will create the segmentations at the wrong position
-#warning "FIXME the labelObjects' indexes might be wrong"
   result = GraphCutsAdapter<itkVolumeType>::process(image,
                                                     segmentationImage,
                                                     seeds,
@@ -201,9 +197,13 @@ int main( int argc, char* argv[] )
   if(result == FUCKEDUP || result == YOUARENOTREADY)
     return EXIT_FAILURE;
 
-  //FIXME deal with MAYDAY better
+  //FIXME deal with JUSTONEOBJECT better
   if(result == JUSTONEOBJECT) //we only have one labelObject
     labelObject2 = labelObject1;
+
+  // VISUALIZATION
+  if(VerbosityConstant::verbosity >= VerbosityConstant::LOW)
+    std::cout << "Visualization" << std::endl;
 
   if(VerbosityConstant::verbosity >= VerbosityConstant::MEDIUM)
     std::cout << "LabelObjects to Image" << std::endl;
@@ -215,25 +215,21 @@ int main( int argc, char* argv[] )
   GCA::labelObjects2Image(labelObject1,
                           labelObject2,
                           volume);
-  //SOLUTION:
-  //  1. save the original roi within labelObjects' indices refer to and use roi.GetIndex();
-  //  or
-  //  1. labelObjects2Image with a volume of the roi region
-  //  2. pad the image to be original size / copy data to it
 
-  //test indices mixup
+#ifdef testindices
   itk::ImageRegionIterator<itkVolumeType> imageIterator2(volume, volume->GetLargestPossibleRegion());
-
-  itkVolumeType::IndexType index2;
+  itkVolumeType::IndexType newIndex;
   while(!imageIterator2.IsAtEnd())
   {
     if(imageIterator2.Get() == 255) {
-      index2 = imageIterator2.GetIndex();
+      newIndex = imageIterator2.GetIndex();
       break;
     }
     ++imageIterator2;
   }
-  std::cout << "Index1: " << index << " Index2: " << index2 << std::endl;
+  std::cout << "Original Index: " << originalIndex << " New Index: " << newIndex << std::endl;
+  std::cout << "Obj 1 Bounding box: " << labelObject1->GetBoundingBox() << std::endl;
+
   if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
 
     WriterFilterType::Pointer writer = WriterFilterType::New();
@@ -256,8 +252,7 @@ int main( int argc, char* argv[] )
       return FUCKEDUP;
     }
   }
-  //done indeces check
-
+#endif
 
   // visualize< itkVolumeType >(volume);
 
