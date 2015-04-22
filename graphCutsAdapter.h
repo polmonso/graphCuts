@@ -126,7 +126,7 @@ class GraphCutsAdapter {
      * @param image             image with the original image data
      * @param segmentationImage image with the selected segmentation to split
      * @param seeds             vector of coordinates for the seeds
-     * @param seeds             vector of coordinates for the sinks
+     * @param sinks             vector of coordinates for the sinks
      * @param labelObject1      output label object
      * @param labelObject1      output label object
      * @param shapeWeight       value added to the weight to favor shape uniformity:
@@ -135,7 +135,7 @@ class GraphCutsAdapter {
     static int process(const TImageType* image,
                        const TImageType* segmentationImage,
                        const std::vector< typename TImageType::IndexType >& seeds,
-                       std::vector< typename TImageType::IndexType > sinks,
+                       const std::vector< typename TImageType::IndexType >& sinks,
                        typename ShapeLabelObjectType::Pointer& labelObject1,
                        typename ShapeLabelObjectType::Pointer& labelObject2,
                        float shapeWeight = 0);

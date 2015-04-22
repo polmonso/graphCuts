@@ -349,7 +349,7 @@ template< typename TImageType >
 int GraphCutsAdapter< TImageType >::process(const TImageType* image,
                                             const TImageType* segmentationImage,
                                             const std::vector< typename TImageType::IndexType >& seeds,
-                                            std::vector< typename TImageType::IndexType > sinks,
+                                            const std::vector< typename TImageType::IndexType >& sinks,
                                             typename ShapeLabelObjectType::Pointer& labelObject1,
                                             typename ShapeLabelObjectType::Pointer& labelObject2,
                                             float shapeWeight) {
@@ -543,6 +543,12 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
 #ifdef USESHIFT
   labelObject1->Shift(offset);
   labelObject2->Shift(offset);
+
+  //we need to do this in order to have updated attributes.
+  //a bit of an overkill, so maybe consider returning a labelmap instead of two objects
+//  ShapeLabelMapFilter::Pointer shape = ShapeFilterType::New();
+//  shape->SetInput(labelMap);
+//  shape->Update();
 //#else
   typename TImageType::RegionType region1 = labelObject1->GetBoundingBox();
   region1.GetModifiableIndex() += offset;
