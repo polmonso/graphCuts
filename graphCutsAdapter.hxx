@@ -299,22 +299,6 @@ int GraphCutsAdapter< TImageType >::graphcuts(const TImageType* segmentationImag
   splittedSegmentationImage->SetRegions(segmentationImage->GetLargestPossibleRegion());
   splittedSegmentationImage->Allocate();
 
-  //Just checking the gradient
-  if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
-    typedef itk::ImageFileWriter< GradientImageType > GradientWriterFilterType;
-    typename GradientWriterFilterType::Pointer gwriter = GradientWriterFilterType::New();
-    for(unsigned int i = 0; i < scoreImages.size() ; i++) {
-      gwriter->SetInput(scoreImages[i]);
-      gwriter->SetFileName("gradient" + std::to_string(i) + ".mha");
-      try {
-        gwriter->Update();
-      } catch( itk::ExceptionObject & error ) {
-        std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
-        return FUCKEDUP;
-      }
-    }
-  }
-  
   // Get the region
   const typename TImageType::RegionType& region = splittedSegmentationImage->GetBufferedRegion();
   int num_nodes = region.GetNumberOfPixels();
@@ -330,10 +314,11 @@ int GraphCutsAdapter< TImageType >::graphcuts(const TImageType* segmentationImag
   int current_node = 0;
   
   // Initialize iterators for score images.
-  std::valarray<itk::ImageRegionConstIterator<GradientImageType>> scores_its(TImageType::ImageDimension);
+  std::array<itk::ImageRegionConstIterator<GradientImageType>, TImageType::ImageDimension> scores_its;
   for(int n = 0; n < TImageType::ImageDimension; ++n)
     scores_its[n] = itk::ImageRegionConstIterator<GradientImageType>(scoreImages[n], region);
-  for(;!segmentation_it.IsAtEnd(); ++segmentation_it, ++current_node, scores_its)
+  for(;!segmentation_it.IsAtEnd(); ++segmentation_it, ++current_node,
+          std::for_each(scores_its.begin(), scores_its.end(), [](itk::ImageRegionConstIterator<GradientImageType>& p){++p;}))
   {
     if(segmentation_it.Get() == 0)
       continue;
@@ -464,12 +449,12 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   imageROIextractor->SetInput(image);
 
   //features
-  typedef itk::RecursiveGaussianImageFilter< TImageType, GradientImageType > GradientFilterType;
+  typedef itk::GradientMagnitudeRecursiveGaussianImageFilter< TImageType, GradientImageType > GradientFilterType;
   typename GradientFilterType::Pointer gradientFilter = GradientFilterType::New();
   gradientFilter->SetInput(imageROIextractor->GetOutput());
   float sigma = 3.5; //TODO use 3.5, pass by parameter or what?
   gradientFilter->SetSigma( sigma );
-  gradientFilter->SetFirstOrder();
+  // gradientFilter->SetFirstOrder();
   std::vector< typename GradientImageType::Pointer > gradients(TImageType::ImageDimension);
 
   typedef itk::RegionOfInterestImageFilter< TImageType, TImageType > ROIFilterType;
@@ -483,8 +468,9 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
     // unnecessary if we have pipeline
     // imageROIextractor->Update();
     //TODO load from disk if available
+    
     for(unsigned int dim = 0; dim < TImageType::ImageDimension; dim++) {
-      gradientFilter->SetDirection(dim);
+      // gradientFilter->SetDirection(dim);
       gradientFilter->Update();
       gradients[dim] = gradientFilter->GetOutput();
       gradients[dim]->DisconnectPipeline();
@@ -533,26 +519,35 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   const float zAnisotropyFactor = 2*spacing[2]/(spacing[0] + spacing[1]);
 
   assert(TImageType::ImageDimension > 0);
-  const unsigned int dims = TImageType::ImageDimension;
+  constexpr unsigned int dims = TImageType::ImageDimension;
   for(unsigned int dim = 0; dim < dims; dim++)
     assert(gradients[dim]->GetRequestedRegion().GetSize() == roi.GetSize());
 
-  //compute 1/p_z*(1/(1+|g|) + shapeWeight)
+  //compute 1/p_z*(1/(1+|g|^2) + shapeWeight)
   //we can also use addition filter and inverse filter (si jamais)
   //x and y dimensions
   for(unsigned int dim = 0; dim < dims-1; dim++) {
     itk::ImageRegionIterator< GradientImageType > git( gradients[dim], gradients[dim]->GetRequestedRegion() );
     while( !git.IsAtEnd()) {
-        git.Set( 1/(1 + std::abs(git.Get())) + shapeWeight );
+        const typename GradientImageType::PixelType pixel = git.Get();
+        git.Set( 1/(1 + pixel*pixel) + shapeWeight );
         ++git;
     }
   }
 
   //z dimension
   {
-    itk::ImageRegionIterator< GradientImageType > git( gradients[dims-1], gradients[dims-1]->GetRequestedRegion() );
+    // Errors of the cut in the Z-axis seem to be harder to fix manually than those 
+    // in the X and Y axes.
+    // Make cuts in the Z-axis more likely even when the anisotropy factor is 1.
+    // TODO: parameter?
+    const typename GradientImageType::PixelType zfactor = 1 / (5 * zAnisotropyFactor);
+    
+    constexpr unsigned int dim = dims - 1;
+    itk::ImageRegionIterator< GradientImageType > git( gradients[dim], gradients[dim]->GetRequestedRegion() );
     while( !git.IsAtEnd()) {
-      git.Set((1/zAnisotropyFactor) * (1/(1 + std::abs(git.Get())) + shapeWeight ));
+      const typename GradientImageType::PixelType pixel = git.Get();
+      git.Set(zfactor * (1/(1 + pixel*pixel) + shapeWeight ));
       ++git;
     }
   }
