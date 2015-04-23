@@ -254,7 +254,30 @@ int main( int argc, char* argv[] )
   }
 #endif
 
-  // visualize< itkVolumeType >(volume);
+  if(VerbosityConstant::verbosity >= VerbosityConstant::HIGH){
+
+    WriterFilterType::Pointer writer = WriterFilterType::New();
+    writer->SetFileName("input.tif");
+    writer->SetInput(image);
+
+    try {
+      writer->Update();
+    } catch( itk::ExceptionObject & error ) {
+      std::cerr << __FILE__ << __LINE__ << "Error: " << error << std::endl;
+      return FUCKEDUP;
+    }
+    writer->SetFileName("output.tif");
+    writer->SetInput(volume);
+
+    try {
+      writer->Update();
+    } catch( itk::ExceptionObject & error ) {
+      std::cerr << __FILE__ << __LINE__ << "Error: " << error << std::endl;
+      return FUCKEDUP;
+    }
+  }
+
+  //visualize< itkVolumeType >(volume);
 
   if(result == FUCKEDUP)
     return EXIT_FAILURE;
