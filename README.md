@@ -6,6 +6,12 @@ Dependencies
 * ITK 4.6.1
 * VTK 6.2.0
 
+The code is header only but the code main has an extra dependency:
+
+* [tclap](http://tclap.sourceforge.net/)
+
+
+
 Building
 --------
 

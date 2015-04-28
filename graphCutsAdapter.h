@@ -135,7 +135,10 @@ class GraphCutsAdapter {
      * @param labelObject1      output label object
      * @param labelObject1      output label object
      * @param shapeWeight       value added to the weight to favor shape uniformity:
-     *                          1/p_z*(1/(1+|g|) + shapeWeight)
+     *                          1/p*(1/(1+|g|^2) + shapeWeight), p = anisotropyFactor
+     * @param zWeight           multiplier of the zgradient to discourage cuts in z
+     *                          1/(zWeight*p_z) * g_z, p = anisotropyFactor,
+     *                          g = gradientMagnitude
      */
     static int process(const TImageType* image,
                        const TImageType* segmentationImage,
@@ -143,7 +146,8 @@ class GraphCutsAdapter {
                        const std::vector< typename TImageType::IndexType >& sinks,
                        typename ShapeLabelObjectType::Pointer& labelObject1,
                        typename ShapeLabelObjectType::Pointer& labelObject2,
-                       float shapeWeight = 0);
+                       float shapeWeight = 0,
+                       float zWeight = 5);
   };
 
 #ifndef ITK_MANUAL_INSTANTIATION

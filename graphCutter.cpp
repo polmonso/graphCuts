@@ -26,8 +26,9 @@
 
 #include "tclap/CmdLine.h"
 
-#include "Visualization.h"
-
+#ifdef VTK_FOUND
+#include "visualization.h"
+#endif
 
 int main( int argc, char* argv[] )
 {
@@ -277,8 +278,10 @@ int main( int argc, char* argv[] )
     }
   }
 
-  //visualize< itkVolumeType >(volume);
-
+#ifdef VTK_FOUND
+  std::cout << "vtk found" << std::endl;
+  visualize< itkVolumeType >(volume);
+#endif
   if(result == FUCKEDUP)
     return EXIT_FAILURE;
 

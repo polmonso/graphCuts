@@ -34,30 +34,33 @@
 
 #pragma once
 
-#include "itkImage.h"
-#include "itkImageIterator.h"
-#include "itkImageFileWriter.h"
-#include "itkImageFileReader.h"
-#include "itkImageRegionIterator.h"
-#include "itkBinaryImageToShapeLabelMapFilter.h"
-#include "itkLabelImageToShapeLabelMapFilter.h"
+#include <itkImage.h>
+#include <itkImageIterator.h>
+#include <itkImageFileWriter.h>
+#include <itkImageFileReader.h>
+#include <itkImageRegionIterator.h>
+#include <itkBinaryImageToShapeLabelMapFilter.h>
+#include <itkLabelImageToShapeLabelMapFilter.h>
 
-#include "itkRelabelComponentImageFilter.h"
-#include "itkConnectedComponentImageFilter.h"
-#include "itkBinaryThresholdImageFilter.h"
+#include <itkRelabelComponentImageFilter.h>
+#include <itkConnectedComponentImageFilter.h>
+#include <itkBinaryThresholdImageFilter.h>
 
-#include "itkExtractImageFilter.h"
-#include "QuickView.h"
-#include "itkCustomColormapFunction.h"
-#include "itkScalarToRGBColormapImageFilter.h"
-#include "itkRGBPixel.h"
-#include "itkMersenneTwisterRandomVariateGenerator.h"
-#include "itkRescaleIntensityImageFilter.h"
-#include "itkThresholdImageFilter.h"
+#include <itkExtractImageFilter.h>
+#include <QuickView.h>
+#include <itkCustomColormapFunction.h>
+#include <itkScalarToRGBColormapImageFilter.h>
+#include <itkRGBPixel.h>
+#include <itkMersenneTwisterRandomVariateGenerator.h>
+#include <itkRescaleIntensityImageFilter.h>
+#include <itkThresholdImageFilter.h>
 
-#include "itkRegionOfInterestImageFilter.h"
+#include <itkRegionOfInterestImageFilter.h>
 
-#include "itkGradientMagnitudeRecursiveGaussianImageFilter.h"
+#include <itkGradientMagnitudeRecursiveGaussianImageFilter.h>
+#include <itkMultiplyImageFilter.h>
+#include <itkImageDuplicator.h>
+#include <itkAddImageFilter.h>
 
 #include <ostream>
 #include <random>
@@ -433,7 +436,8 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
                                             const std::vector< typename TImageType::IndexType >& sinks,
                                             typename ShapeLabelObjectType::Pointer& labelObject1,
                                             typename ShapeLabelObjectType::Pointer& labelObject2,
-                                            float shapeWeight) {
+                                            float shapeWeight,
+                                            float zWeight) {
 
   //if we allow Real Time seeds might yet not be both there
   if(seeds.size() == 0 || sinks.size() == 0)
@@ -462,19 +466,28 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   segmentationROIextractor->SetRegionOfInterest(roi);
   segmentationROIextractor->SetInput(segmentationImage);
 
+  typedef itk::ImageDuplicator< GradientImageType > DuplicatorType;
+  typename DuplicatorType::Pointer duplicatorFilter = DuplicatorType::New();
+  duplicatorFilter->SetInputImage(gradientFilter->GetOutput());
+
   try {
     segmentationROIextractor->Update();
 
     // unnecessary if we have pipeline
     // imageROIextractor->Update();
     //TODO load from disk if available
-    
-    for(unsigned int dim = 0; dim < TImageType::ImageDimension; dim++) {
+    gradientFilter->Update();
+    for(unsigned int dim = 0; dim < TImageType::ImageDimension - 1; dim++) {
       // gradientFilter->SetDirection(dim);
-      gradientFilter->Update();
+      //gradientFilter->Update();
       gradients[dim] = gradientFilter->GetOutput();
-      gradients[dim]->DisconnectPipeline();
+      //gradients[dim]->DisconnectPipeline();
     }
+
+    //gradients[TImageType::ImageDimension-1] = gradientFilter->GetOutput();
+    duplicatorFilter->Update();
+    gradients[TImageType::ImageDimension-1] = duplicatorFilter->GetOutput();
+
   } catch( itk::ExceptionObject & error ) {
     std::cerr << __FILE__ << ":" << __LINE__ << " Error: " << error << std::endl;
     return FUCKEDUP;
@@ -540,8 +553,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
     // Errors of the cut in the Z-axis seem to be harder to fix manually than those 
     // in the X and Y axes.
     // Make cuts in the Z-axis more likely even when the anisotropy factor is 1.
-    // TODO: parameter?
-    const typename GradientImageType::PixelType zfactor = 1 / (5 * zAnisotropyFactor);
+    const typename GradientImageType::PixelType zfactor = 1 / (zWeight * zAnisotropyFactor);
     
     constexpr unsigned int dim = dims - 1;
     itk::ImageRegionIterator< GradientImageType > git( gradients[dim], gradients[dim]->GetRequestedRegion() );
@@ -624,7 +636,7 @@ int GraphCutsAdapter< TImageType >::process(const TImageType* image,
   for(unsigned int i = 0; i < TImageType::ImageDimension; i++)
     offset[i] = index[i];
 
-#warning Shift doesn't work correctly given that \
+#warning Shift doesnt work correctly given that \
   it does not change the bounding box. \
   Setting the boundingbox does not work either, \
   given that the indexes of the pixels remain unchanged. \
