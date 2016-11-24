@@ -1,5 +1,7 @@
 # Graph Cuts
 
+Command line interface and implementation of a Graph Cuts algorithm
+
 Dependencies
 ------------
 
